@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any
 import numpy as np
 import pandas as pd
 import ccxt
-from catboost import CatBoostClassifier
+from catboost import CatBoostClassifier ,CatBoostRegressor
 import math
 # ------------------------ Configuration ------------------------
 DEFAULT_CONFIG = {
@@ -223,17 +223,17 @@ def zscore(series: pd.Series, length: int = 50) -> pd.Series:
 
 
 
-def compute_prediction_series(df: pd.DataFrame, model, cfg: Dict[str, Any]) -> np.ndarray:  # Added 'model' arg
-    prediction_horizon = cfg.get('prediction_horizon', 7)  # Use renamed
-    # ... (paste indicator + normalization code from generate_features_and_labels, up to features = np.vstack([nrsi...]).T )
 
-    N = len(df)
-    prediction = np.full(N, 0.0, dtype=float)  # Default to 0 return
-    valid_mask = ~np.isnan(features).any(axis=1)
-    if valid_mask.any() and model is not None:
-        valid_features = features[valid_mask]
-        prediction[valid_mask] = model.predict(valid_features)  # Returns floats
-
+def compute_prediction_series(df: pd.DataFrame, model, cfg: Dict[str, Any]) -> float:
+    if model is None:
+        return 0.0
+    
+    # 1. 仅计算最新的特征
+    features = extract_features_from_df(df, cfg) # 建议抽离出的函数
+    last_feature = features[-1].reshape(1, -1)
+    
+    # 2. 直接推理
+    prediction = model.predict(last_feature)[0]
     return prediction
 
 # compute features
@@ -595,7 +595,7 @@ def step(self):
             elif self.position is not None and sell_signal and self.position['side'] == 'LONG':
                 exit_res = simulate_exit(self.position['entry'], price, self.cfg)
                 pnl = exit_res['net_pnl']
-                self.capital += pnl / max(1e-12, self.capital)
+                self.capital += pnl
                 self.db.record_trade(self.cfg['symbol'], 'SELL', exit_res['exit_price'], self.position['entry']['size'], self.position['entry']['notional'], exit_res['fee'], exit_res['net_pnl'], note='SIMULATED SMC EXIT')
                 logging.info(f"SIMULATED EXIT net_pnl={pnl:.6f}, new capital approx={self.capital:.6f}")
                 self.position = None
@@ -623,7 +623,7 @@ def step(self):
                 if entry.get('stop_price') is not None and current_price <= entry['stop_price']:
                     exit_res = simulate_exit(entry, current_price, self.cfg)
                     pnl = exit_res['net_pnl']
-                    self.capital += pnl / max(1e-12, self.capital)
+                    self.capital += pnl
                     self.db.record_trade(self.cfg['symbol'], 'SELL', exit_res['exit_price'], size, entry['notional'], exit_res['fee'], exit_res['net_pnl'], note='SIMULATED STOP EXIT')
                     logging.info(f"STOP EXIT net_pnl={pnl:.6f}, new capital approx={self.capital:.6f}")
                     self.position = None
